@@ -101,7 +101,8 @@ RUN apk add --no-cache \
     openssh-client \
     bash \
     curl \
-    python3
+    python3 \
+    ripgrep
 
 # Prepare user - handle root case specially
 RUN set -eux; \

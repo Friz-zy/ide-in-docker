@@ -1,10 +1,10 @@
 version: '3.8'
 
 services:
-  theia-ide:
+  vscode-ide:
     build:
       context: .
-      dockerfile: Dockerfile.alpine
+      dockerfile: Dockerfile.bookworm-slim
       args:
         - UID=1000
         - GID=1000
@@ -12,11 +12,11 @@ services:
       - "3000:3000"
     volumes:
       # Mount workspace to persist work
-      - ./workspace:/theia/workspace:rw
+      - ./code:/vscode/workspace:rw
+      - ./vscode:/vscode/.vscode:rw
       # Optional: mount additional plugins
-      - ./plugins:/theia/plugins:rw
+      - ./plugins:/vscode/plugins:rw
     environment:
       - NODE_ENV=production
     restart: unless-stopped
-    container_name: theia-ide
-
+    container_name: vscode-ide

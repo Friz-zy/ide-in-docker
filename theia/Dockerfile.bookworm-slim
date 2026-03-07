@@ -102,6 +102,7 @@ RUN apt-get update && apt-get install -y \
     curl \
     python3 \
     procps \
+    ripgrep \
     && rm -rf /var/lib/apt/lists/*
 
 # Prepare user - handle root case specially

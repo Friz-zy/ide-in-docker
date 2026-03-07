@@ -1,0 +1,116 @@
+# https://github.com/coder/code-server/blob/aff005e19626ac6802223713fa569e743c125725/ci/release-image/Dockerfile
+# Production stage
+FROM node:lts-bookworm-slim AS production
+
+ARG UID=1000
+ARG GID=1000
+ARG NAME=vscode
+ARG PORT=3000
+ARG RELEASE=latest
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install runtime dependencies
+# RUN echo "deb http://deb.debian.org/debian bookworm main" > /etc/apt/sources.list
+RUN apt-get update \
+  && apt-get install -y \
+    ca-certificates \
+    curl \
+    dumb-init \
+    git \
+    git-lfs \
+    htop \
+    locales \
+    lsb-release \
+    man-db \
+    nano \
+    openssh-client \
+    python3 \
+    npm \
+    procps \
+    vim-tiny \
+    wget \
+    ripgrep \
+  && git lfs install \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
+# https://wiki.debian.org/Locale#Manually
+RUN sed -i "s/# en_US.UTF-8/en_US.UTF-8/" /etc/locale.gen \
+  && locale-gen
+ENV LANG=en_US.UTF-8
+
+RUN npm install -g @kilocode/cli
+
+# Prepare user - handle root case specially
+RUN set -eux; \
+    if [ "${UID}" = "0" ] && [ "${GID}" = "0" ] && [ "${NAME}" = "root" ]; then \
+        # Root case - root user already exists, just ensure /vscode directory
+        :; \
+    else \
+        # Non-root case - create/modify user and group
+        if getent group "${GID}" >/dev/null 2>&1; then \
+            existing_group="$(getent group "${GID}" | cut -d: -f1)"; \
+            if [ "${existing_group}" != "${NAME}" ]; then \
+                groupmod -n "${NAME}" "${existing_group}"; \
+            fi; \
+        else \
+            groupadd -g "${GID}" "${NAME}"; \
+        fi; \
+        if getent passwd "${UID}" >/dev/null 2>&1; then \
+            existing_user="$(getent passwd "${UID}" | cut -d: -f1)"; \
+            if [ "${existing_user}" != "${NAME}" ]; then \
+                usermod -l "${NAME}" "${existing_user}"; \
+                usermod -d "/vscode" -m "${NAME}" 2>/dev/null || true; \
+                usermod -g "${NAME}" "${NAME}"; \
+            fi; \
+        else \
+            useradd -r -u "${UID}" -g "${NAME}" -d "/vscode" -s /bin/bash "${NAME}"; \
+        fi; \
+    fi
+
+# Download release
+RUN set -eux; \
+    if [ "$RELEASE" = "latest" ]; then \
+      TAG=$(curl -sSL https://api.github.com/repos/coder/code-server/releases/latest \
+            | grep '"tag_name"' \
+            | sed -E 's/.*"([^"]+)".*/\1/'); \
+    else \
+      TAG=$RELEASE; \
+    fi; \
+    TAG="${TAG#v}"; \
+    ARCH=$(dpkg --print-architecture); \
+    DEB_URL="https://github.com/coder/code-server/releases/download/v${TAG}/code-server_${TAG}_${ARCH}.deb"; \
+    wget -qO /tmp/code-server.deb "$DEB_URL"; \
+    dpkg -i /tmp/code-server.deb; \
+    rm -rf /tmp/code-server.deb /var/lib/apt/lists/*
+
+# Create working directory
+WORKDIR /vscode
+
+# Set file ownership - only for non-root users
+RUN chown -R ${NAME}:${NAME} /vscode
+
+# Switch to specified user
+USER ${NAME}
+
+# Expose port
+EXPOSE ${PORT}
+
+# Environment variables for Theia
+ENV SHELL=/bin/bash \
+    NODE_ENV=production \
+    PORT=${PORT}
+
+# Create workspace directory
+RUN mkdir -p /vscode/workspace
+
+# Start browser application
+CMD if [ -d "~/entrypoint.d" ]; then \
+      find "~/entrypoint.d" -type f -executable -print -exec {} \; ; \
+    fi && \
+    if [ -d "/entrypoint.d" ]; then \
+      find "/entrypoint.d" -type f -executable -print -exec {} \; ; \
+    fi && \
+    exec dumb-init /usr/bin/code-server --bind-addr 0.0.0.0:${PORT} --user-data-dir ~/.vscode --auth none /vscode/workspace "$@"
