@@ -4,19 +4,36 @@ services:
   vscode-ide:
     build:
       context: .
-      dockerfile: Dockerfile.bookworm-slim
+      dockerfile: Dockerfile.podman
       args:
-        - UID=1000
-        - GID=1000
+        UID: "1000"
+        GID: "1000"
+        NAME: "vscode"
+        PORT: "3000"
+        RELEASE: "latest"
     ports:
       - "3000:3000"
     volumes:
       # Mount workspace to persist work
-      - ./code:/vscode/workspace:rw
-      - ./vscode:/vscode/.vscode:rw
+      - /home/user/Code:/vscode/workspace:rw
+      - /home/user/.vscode:/vscode/.vscode:rw
+      - /home/user/.kilocode:/vscode/.kilocode:rw
       # Optional: mount additional plugins
       - ./plugins:/vscode/plugins:rw
     environment:
       - NODE_ENV=production
     restart: unless-stopped
     container_name: vscode-ide
+    privileged: false
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SYS_PTRACE
+    security_opt:
+      - no-new-privileges:false # important for setuid
+      - seccomp:unconfined
