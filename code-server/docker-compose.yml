@@ -15,13 +15,17 @@ services:
       - "3000:3000"
     volumes:
       # Mount workspace to persist work
-      - /home/user/Code:/vscode/workspace:rw
-      - /home/user/.vscode:/vscode/.vscode:rw
-      - /home/user/.kilocode:/vscode/.kilocode:rw
+      - ./vscode:/vscode:rw
+      - $HOME/Code:/vscode/workspace:rw
+      - $HOME/.vscode:/vscode/.vscode:rw
+      - $HOME/.kilocode:/vscode/.kilocode:rw
       # Optional: mount additional plugins
       - ./plugins:/vscode/plugins:rw
+      - ./podman:/vscode/.local/share/containers:rw
     environment:
       - NODE_ENV=production
+      # Rootless DinD API (compose-internal network only)
+      - DOCKER_HOST=${DIND_HOST:-tcp://dind:2375}
     restart: unless-stopped
     container_name: vscode-ide
     privileged: false
@@ -37,3 +41,123 @@ services:
     security_opt:
       - no-new-privileges:false # important for setuid
       - seccomp:unconfined
+    tmpfs:
+      - /tmp
+
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: llama
+    restart: unless-stopped
+
+    # Unprivileged user. Does not need to exist in /etc/passwd.
+    user: "65532:65532"
+
+    # Defense in depth.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+    # Writable temporary filesystem.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+
+    environment:
+      HOME: /tmp
+
+      # llama.cpp native model cache.
+      LLAMA_CACHE: /cache
+
+      # Explicit HF cache locations avoid attempts to use /root.
+      HF_HOME: /cache/huggingface
+      HF_HUB_CACHE: /cache/huggingface/hub
+
+    ports:
+      - "127.0.0.1:8080:8080"
+
+    volumes:
+      - ./llama:/cache:rw
+
+    command:
+      - -hf
+      - ggml-org/Qwen3-4B-GGUF:Q4_K_M
+
+      - --host
+      - 0.0.0.0
+
+      - --port
+      - "8080"
+
+      - --alias
+      - local-qwen
+
+      - --threads
+      - "2"
+
+      - --threads-batch
+      - "4"
+
+      - --ctx-size
+      - "4096"
+
+      - --batch-size
+      - "256"
+
+      - --ubatch-size
+      - "128"
+
+      - --parallel
+      - "1"
+
+      - --cache-type-k
+      - q8_0
+
+      - --cache-type-v
+      - q8_0
+
+      - --flash-attn
+      - auto
+
+      - --load-mode
+      - mmap
+
+  # ── Rootless DinD: unprivileged docker daemon (no privileged flag) ──────────
+  # dockerd runs as non-root (uid 1000) inside its own user namespace.
+  # API is reachable ONLY on the compose-internal network — no published ports.
+  #
+  # Tunables (override via .env):
+  #   DIND_IMAGE — daemon image (default docker:27-dind-rootless)
+  #   DIND_HOST  — API endpoint advertised to vscode-ide (default tcp://dind:2375)
+  dind:
+    image: ${DIND_IMAGE:-docker:27-dind-rootless}
+    container_name: dind-rootless
+    restart: unless-stopped
+    # Default seccomp profile blocks clone(CLONE_NEWUSER), which rootlesskit
+    # needs; isolation comes from the daemon's own user namespace instead.
+    security_opt:
+      - seccomp:unconfined
+    devices:
+      # fuse-overlayfs storage inside dind; FUSE access is confined to the
+      # container's own mount namespace. Remove this line on hosts without
+      # /dev/fuse — dockerd then falls back to the vfs storage driver.
+      - /dev/fuse
+    environment:
+      # TLS off: unauthenticated API stays confined to the internal network
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - --host=tcp://0.0.0.0:2375
+    volumes:
+      # Named volume keeps correct ownership for the rootless user
+      - dind-data:/home/rootless/.local/share/docker
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD-SHELL", "docker -H tcp://127.0.0.1:2375 info >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  dind-data:

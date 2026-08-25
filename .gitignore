@@ -1,0 +1,5 @@
+# Runtime bind-mount targets from code-server/docker-compose.yml
+code-server/vscode/
+code-server/plugins/
+code-server/podman/
+code-server/llama/
