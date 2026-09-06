@@ -1,0 +1,164 @@
+name: Build and publish container
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - .github/workflows/container.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - .github/workflows/container.yml
+  schedule:
+    # Rebuild daily so age-eligible system/npm packages can move forward without
+    # mutating an already published image tag.
+    - cron: '00 10 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: container-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Resolve image name
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+          image="${REGISTRY}/${GITHUB_REPOSITORY}"
+          echo "name=${image,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve age-eligible code-server version
+        id: code_server
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="$({
+            curl -fsSL \
+              --retry 3 \
+              --retry-all-errors \
+              -H "Accept: application/vnd.github+json" \
+              -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "X-GitHub-Api-Version: 2022-11-28" \
+              "https://api.github.com/repos/coder/code-server/releases?per_page=100"
+          } | python3 -c '
+          import datetime
+          import json
+          import sys
+
+          cutoff = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
+          releases = json.load(sys.stdin)
+          eligible = [
+              release
+              for release in releases
+              if not release["draft"]
+              and not release["prerelease"]
+              and release.get("published_at")
+              and datetime.datetime.fromisoformat(
+                  release["published_at"].replace("Z", "+00:00")
+              ) < cutoff
+          ]
+          eligible.sort(key=lambda release: release["published_at"], reverse=True)
+          if not eligible:
+              raise SystemExit("No code-server release is older than seven days")
+          print(eligible[0]["tag_name"].removeprefix("v"))
+          ' )"
+
+          test -n "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Resolved code-server: $version"
+
+      - name: Generate immutable image tag
+        id: image_tag
+        shell: bash
+        env:
+          CODE_SERVER_VERSION: ${{ steps.code_server.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          short_sha="$(git rev-parse --short=7 "$GITHUB_SHA")"
+          build_date="$(date -u +%Y%m%d)"
+          tag="${CODE_SERVER_VERSION}-${short_sha}-${build_date}"
+
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
+          echo "build_date=$build_date" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "Image tag: $tag"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Refuse to overwrite existing tag
+        if: github.event_name != 'pull_request'
+        shell: bash
+        env:
+          IMAGE: ${{ steps.image.outputs.name }}
+          TAG: ${{ steps.image_tag.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if docker buildx imagetools inspect "${IMAGE}:${TAG}" >/dev/null 2>&1; then
+            echo "ERROR: ${IMAGE}:${TAG} already exists. Refusing to overwrite immutable tag." >&2
+            exit 1
+          fi
+
+          echo "Tag is free: ${IMAGE}:${TAG}"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Generate image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          tags: |
+            type=raw,value=${{ steps.image_tag.outputs.tag }}
+            type=raw,value=latest
+          labels: |
+            org.opencontainers.image.version=${{ steps.image_tag.outputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            io.coder.code-server.version=${{ steps.code_server.outputs.version }}
+
+      - name: Build and publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            RELEASE=${{ steps.code_server.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: mode=max
+          sbom: true

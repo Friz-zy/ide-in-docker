@@ -1,0 +1,196 @@
+services:
+  vscode-ide:
+    image: ghcr.io/Friz-zy/ide-in-docker:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Compose resolves these on the host; they are build args, not runtime
+        # environment variables.
+        UID: "${UID:-1000}"
+        GID: "${GID:-1000}"
+        NAME: "${NAME:-vscode}"
+        PORT: "${PORT:-3000}"
+        RELEASE: "${RELEASE:-latest}"
+    ports:
+      # Loopback-only by default; HOST_IP is an explicit exposure override.
+      - "${HOST_IP:-127.0.0.1}:${HOST_PORT:-3000}:${PORT:-3000}"
+    volumes:
+      # Mount workspace to persist work
+      - ./vscode:/vscode:rw
+      # Compose interpolation of ${WORKSPACE:-$HOME/Code} is valid; WORKSPACE
+      # is preferred and the fallback is expanded from the host environment.
+      - "${WORKSPACE:-$HOME/Code}:/vscode/workspace:rw"
+      - $HOME/.vscode:/vscode/.vscode:rw
+      - $HOME/.config/kilo:/vscode/.config/kilo:rw
+      - $HOME/.codex:/vscode/.codex
+      # Optional: mount additional plugins
+      # - ./plugins:/vscode/plugins:rw
+      - podman-data:/vscode/.local/share/containers:rw
+    environment:
+      NODE_ENV: production
+      XDG_CACHE_HOME: /vscode/.cache
+      # Rootless DinD API (compose-internal network only)
+      DOCKER_HOST: "${DIND_HOST:-tcp://dind:2375}"
+    restart: unless-stopped
+    container_name: vscode-ide
+    privileged: false
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+      - /dev/net/tun:/dev/net/tun:rwm
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SYS_PTRACE
+      - SYS_ADMIN
+      - NET_ADMIN
+      - MKNOD
+    security_opt:
+      - no-new-privileges=false # important for setuid
+      - seccomp=unconfined
+      - label=disable
+      - systempaths=unconfined
+      - apparmor=unconfined
+    tmpfs:
+      - /tmp
+
+  # ── Rootless DinD: unprivileged docker daemon (no privileged flag) ──────────
+  # dockerd runs as non-root (uid 1000) inside its own user namespace.
+  # API is reachable ONLY on the compose-internal network — no published ports.
+  #
+  # Tunables (override via .env):
+  #   DIND_IMAGE — daemon image (default docker:27-dind-rootless)
+  #   DIND_HOST  — API endpoint advertised to vscode-ide (default tcp://dind:2375)
+  dind:
+    image: "docker:27-dind-rootless@sha256:e2ac8e8f66ae21a060b0a8e3005c70f6ed9441aabf409434463d1f6eecd38026"
+    container_name: dind-rootless
+    restart: unless-stopped
+    # Default seccomp profile blocks clone(CLONE_NEWUSER), which rootlesskit
+    # needs; isolation comes from the daemon's own user namespace instead.
+    environment:
+      # TLS off: unauthenticated API stays confined to the internal network
+      DOCKER_TLS_CERTDIR: ""
+    command:
+      - --host=tcp://0.0.0.0:2375
+    volumes:
+      # Named volume keeps correct ownership for the rootless user
+      - dind-data:/home/rootless/.local/share/docker
+      - "${WORKSPACE:-$HOME/Code}:/vscode/workspace:rw"
+    privileged: false
+    devices:
+      - /dev/fuse:/dev/fuse:rwm
+      - /dev/net/tun:/dev/net/tun:rwm
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SYS_PTRACE
+      - SYS_ADMIN
+      - NET_ADMIN
+      - MKNOD
+    security_opt:
+      - no-new-privileges=false # important for setuid
+      - seccomp=unconfined
+      - label=disable
+      - systempaths=unconfined
+      - apparmor=unconfined
+    tmpfs:
+      - /tmp
+    healthcheck:
+      test: ["CMD-SHELL", "docker -H tcp://127.0.0.1:2375 info >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+
+  # llama:
+  #   image: ghcr.io/ggml-org/llama.cpp:server
+  #   container_name: llama
+  #   restart: unless-stopped
+
+  #   # Unprivileged user. Does not need to exist in /etc/passwd.
+  #   user: "65532:65532"
+
+  #   # Defense in depth.
+  #   read_only: true
+  #   cap_drop:
+  #     - ALL
+  #   security_opt:
+  #     - no-new-privileges:true
+
+  #   # Writable temporary filesystem.
+  #   tmpfs:
+  #     - /tmp:rw,noexec,nosuid,nodev,size=64m
+
+  #   environment:
+  #     HOME: /tmp
+
+  #     # llama.cpp native model cache.
+  #     LLAMA_CACHE: /cache
+
+  #     # Explicit HF cache locations avoid attempts to use /root.
+  #     HF_HOME: /cache/huggingface
+  #     HF_HUB_CACHE: /cache/huggingface/hub
+
+  #   ports:
+  #     - "127.0.0.1:8080:8080"
+
+  #   volumes:
+  #     - ./llama:/cache:rw
+
+  #   command:
+  #     - -hf
+  #     - ggml-org/Qwen3-4B-GGUF:Q4_K_M
+
+  #     - --host
+  #     - 0.0.0.0
+
+  #     - --port
+  #     - "8080"
+
+  #     - --alias
+  #     - local-qwen
+
+  #     - --threads
+  #     - "2"
+
+  #     - --threads-batch
+  #     - "4"
+
+  #     - --ctx-size
+  #     - "4096"
+
+  #     - --batch-size
+  #     - "256"
+
+  #     - --ubatch-size
+  #     - "128"
+
+  #     - --parallel
+  #     - "1"
+
+  #     - --cache-type-k
+  #     - q8_0
+
+  #     - --cache-type-v
+  #     - q8_0
+
+  #     - --flash-attn
+  #     - auto
+
+  #     - --load-mode
+  #     - mmap
+
+volumes:
+  dind-data:
+  podman-data:

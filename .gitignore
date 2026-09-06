@@ -1,5 +1,23 @@
-# Runtime bind-mount targets from code-server/docker-compose.yml
-code-server/vscode/
-code-server/plugins/
-code-server/podman/
-code-server/llama/
+# Workspace directories (will be mounted)
+workspace
+code
+vscode
+plugins
+podman
+
+# Kilo runtime/recovery state only; project commands, agents, and kilo.json are source.
+.kilo/agent-manager.json
+.kilo/recovery/
+
+# Coder secrets, runtime state, and generated acceptance evidence.
+# Keep manifests, scripts, templates, and example configuration tracked.
+coder/config
+coder/config.*
+!coder/config.example
+coder/secrets/
+coder/data/
+coder/backups/
+coder/runtime/
+coder/acceptance-results/
+coder/*.acceptance.log
+coder/*.acceptance.json
