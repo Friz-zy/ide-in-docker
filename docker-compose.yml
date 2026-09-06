@@ -1,6 +1,6 @@
 services:
   vscode-ide:
-    image: ghcr.io/Friz-zy/ide-in-docker:latest
+    image: ghcr.io/friz-zy/ide-in-docker:latest
     build:
       context: .
       dockerfile: Dockerfile

@@ -5,7 +5,7 @@ A batteries-included `code-server` development image built around Fedora/Podman,
 The published image is intended to be usable directly through Docker Compose without rebuilding:
 
 ```text
-ghcr.io/Friz-zy/ide-in-docker:latest
+ghcr.io/friz-zy/ide-in-docker:latest
 ```
 
 For reproducible deployments, prefer an immutable build tag instead of `latest`.
@@ -16,7 +16,7 @@ The published image is built with the following defaults:
 
 | Setting | Default | Notes |
 | --- | --- | --- |
-| Image | `ghcr.io/Friz-zy/ide-in-docker:latest` | Mutable convenience tag pointing to the newest successful build |
+| Image | `ghcr.io/friz-zy/ide-in-docker:latest` | Mutable convenience tag pointing to the newest successful build |
 | Base | Fedora-based `quay.io/podman/stable` | Podman is available directly inside the IDE container |
 | Architectures | `linux/amd64`, `linux/arm64` | Published by GitHub Actions |
 | User | `vscode` | Non-root development user |
@@ -157,13 +157,13 @@ latest
 For reproducibility or production-like use, pin the immutable tag:
 
 ```bash
-docker pull ghcr.io/Friz-zy/ide-in-docker:4.104.2-a83f912-20260906
+docker pull ghcr.io/friz-zy/ide-in-docker:4.104.2-a83f912-20260906
 ```
 
 For the strongest possible pinning, use the image digest:
 
 ```text
-ghcr.io/Friz-zy/ide-in-docker@sha256:<digest>
+ghcr.io/friz-zy/ide-in-docker@sha256:<digest>
 ```
 
 ### Why rebuild every week?
@@ -342,25 +342,25 @@ The second prevents normal third-party source-distribution builds, reducing expo
 Images are published to:
 
 ```text
-ghcr.io/Friz-zy/ide-in-docker
+ghcr.io/friz-zy/ide-in-docker
 ```
 
 Use the newest build:
 
 ```bash
-docker pull ghcr.io/Friz-zy/ide-in-docker:latest
+docker pull ghcr.io/friz-zy/ide-in-docker:latest
 ```
 
 Or use an immutable build tag:
 
 ```bash
-docker pull ghcr.io/Friz-zy/ide-in-docker:<code-server-version>-<short-sha>-<date>
+docker pull ghcr.io/friz-zy/ide-in-docker:<code-server-version>-<short-sha>-<date>
 ```
 
 Example:
 
 ```bash
-docker pull ghcr.io/Friz-zy/ide-in-docker:4.104.2-a83f912-20260906
+docker pull ghcr.io/friz-zy/ide-in-docker:4.104.2-a83f912-20260906
 ```
 
 ## Local image build
